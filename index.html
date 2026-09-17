@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="AI-ML based Intelligent Dead Reckoning System for seamless vehicle navigation during GNSS outages. Prototype implementing RBPF-based sensor fusion with IO-VNBD dataset." />
+  <title>IDR System | Intelligent Dead Reckoning Prototype</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Initializing Navigation Engine</div>
+    <div class="loading-subtitle">Loading IO-VNBD dataset and configuring filters</div>
+  </div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="header-logo">
+        <div class="header-logo-icon">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="header-title">IDR Navigation System</div>
+          <div class="header-subtitle">Intelligent Dead Reckoning Prototype</div>
+        </div>
+      </div>
+      <div class="header-divider"></div>
+      <div class="mode-badge gnss" id="modeBadge">
+        <span class="indicator"></span>
+        <span id="modeText">GNSS+INS</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div id="datasetInfo" style="font-size: 0.72rem; color: var(--gray-500);">
+        IO-VNBD | M (Driver B) | Coventry, UK
+      </div>
+    </div>
+  </header>
+
+  <!-- Main App Container -->
+  <div class="app-container">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+
+      <!-- Algorithm Metrics -->
+      <div class="sidebar-section">
+        <div class="section-header">Navigation State</div>
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Position Error</div>
+            <div class="metric-value" id="metricPosError">0.0<span class="metric-unit">m</span></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Speed</div>
+            <div class="metric-value primary" id="metricSpeed">0.0<span class="metric-unit">km/h</span></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Heading</div>
+            <div class="metric-value" id="metricHeading">0.0<span class="metric-unit">deg</span></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Uncertainty</div>
+            <div class="metric-value" id="metricUncertainty">0.0<span class="metric-unit">m</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Comparison -->
+      <div class="sidebar-section">
+        <div class="section-header">Error Comparison</div>
+        <div class="error-bar-container">
+          <div class="stats-row">
+            <span class="stats-label">Pure INS Drift</span>
+            <span class="stats-value" id="insErrorVal">0.0 m</span>
+          </div>
+          <div class="error-bar">
+            <div class="error-bar-fill high" id="insErrorBar" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="error-bar-container">
+          <div class="stats-row">
+            <span class="stats-label">RBPF + Map Matching</span>
+            <span class="stats-value" id="pfErrorVal">0.0 m</span>
+          </div>
+          <div class="error-bar">
+            <div class="error-bar-fill low" id="pfErrorBar" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="error-bar-container">
+          <div class="stats-row">
+            <span class="stats-label">Fused Solution</span>
+            <span class="stats-value" id="fusedErrorVal">0.0 m</span>
+          </div>
+          <div class="error-bar">
+            <div class="error-bar-fill medium" id="fusedErrorBar" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GNSS Outage Simulation -->
+      <div class="sidebar-section">
+        <div class="section-header">GNSS Outage Simulation</div>
+        <div class="control-group">
+          <div class="control-label">
+            <span>Outage Start Position</span>
+            <span class="control-label-value" id="outageStartLabel">30%</span>
+          </div>
+          <input type="range" id="outageStart" min="0" max="100" value="30" />
+        </div>
+        <div class="control-group">
+          <div class="control-label">
+            <span>Outage Duration</span>
+            <span class="control-label-value" id="outageDurationLabel">20%</span>
+          </div>
+          <input type="range" id="outageDuration" min="5" max="60" value="20" />
+        </div>
+        <div class="btn-group" style="margin-top: 8px;">
+          <button class="btn btn-danger btn-sm" id="btnApplyOutage">Apply Outage</button>
+          <button class="btn btn-outline btn-sm" id="btnClearOutage">Clear</button>
+        </div>
+        <div class="outage-indicator" id="outageInfo" style="display: none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red-400)" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <span class="outage-indicator-text" id="outageInfoText">GNSS outage active</span>
+        </div>
+      </div>
+
+      <!-- Algorithm Parameters -->
+      <div class="sidebar-section">
+        <div class="section-header">Algorithm Parameters</div>
+        <div class="control-group">
+          <div class="control-label">
+            <span>Particle Count</span>
+            <span class="control-label-value" id="particleCountLabel">100</span>
+          </div>
+          <input type="range" id="particleCount" min="20" max="500" value="100" step="10" />
+        </div>
+        <div class="control-group">
+          <div class="control-label">
+            <span>d_min (road threshold)</span>
+            <span class="control-label-value" id="dMinLabel">25 m</span>
+          </div>
+          <input type="range" id="dMinSlider" min="2" max="100" value="25" />
+        </div>
+        <div class="toggle-container">
+          <span class="toggle-text">Map Matching</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggleMapMatch" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-container">
+          <span class="toggle-text">Non-Holonomic Constraints</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggleNHC" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-container">
+          <span class="toggle-text">Particle Filter (RBPF)</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="togglePF" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Performance Stats -->
+      <div class="sidebar-section">
+        <div class="section-header">Performance Summary</div>
+        <div class="stats-row">
+          <span class="stats-label">Total Distance</span>
+          <span class="stats-value" id="statTotalDist">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">DR Distance</span>
+          <span class="stats-value" id="statDRDist">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Mean INS Error</span>
+          <span class="stats-value" id="statMeanINS">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Mean PF Error</span>
+          <span class="stats-value" id="statMeanPF">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">INS Drift Rate</span>
+          <span class="stats-value" id="statDriftRate">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">PF Drift Rate</span>
+          <span class="stats-value" id="statPFDrift">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">P95 INS Error</span>
+          <span class="stats-value" id="statP95INS">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">P95 PF Error</span>
+          <span class="stats-value" id="statP95PF">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Effective Particles</span>
+          <span class="stats-value" id="statNeff">--</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Map -->
+      <div class="map-container">
+        <div id="map"></div>
+
+        <!-- Map Legend -->
+        <div class="map-overlay map-overlay-bottom-left">
+          <div class="map-legend">
+            <div class="map-legend-title">Trajectory Legend</div>
+            <div class="legend-item">
+              <div class="legend-line" style="background: #1b7a2b;"></div>
+              <span>Ground Truth (GPS)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-line" style="background: #c62828; border-style: dashed; border-width: 1.5px; border-color: #c62828; background: transparent; height: 0;"></div>
+              <span>Pure INS (Dead Reckoning)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-line" style="background: #1a73e8;"></div>
+              <span>RBPF Fused Solution</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-dot" style="background: rgba(26, 115, 232, 0.4); border: 1px solid rgba(26, 115, 232, 0.7);"></div>
+              <span>Particle Cloud</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Playback Bar -->
+      <div class="playback-bar">
+        <div class="playback-controls">
+          <button class="btn btn-icon btn-outline" id="btnRestart" title="Restart">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+            </svg>
+          </button>
+          <button class="btn btn-icon btn-primary" id="btnPlayPause" title="Play / Pause">
+            <svg id="iconPlay" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <svg id="iconPause" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+              <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+            </svg>
+          </button>
+        </div>
+        <div class="playback-progress" id="progressBar">
+          <div class="playback-progress-fill" id="progressFill"></div>
+          <div class="playback-progress-handle" id="progressHandle"></div>
+        </div>
+        <div class="playback-time" id="playbackTime">0 / 0</div>
+        <div class="speed-selector">
+          <button class="speed-btn" data-speed="1">1x</button>
+          <button class="speed-btn active" data-speed="5">5x</button>
+          <button class="speed-btn" data-speed="10">10x</button>
+          <button class="speed-btn" data-speed="25">25x</button>
+          <button class="speed-btn" data-speed="50">50x</button>
+        </div>
+      </div>
+
+      <!-- Bottom Charts Panel -->
+      <div class="bottom-panel">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <span class="chart-title">Position Error Over Time</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="chartError"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <span class="chart-title">IMU Accelerometer</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="chartAccel"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <span class="chart-title">Speed & Heading</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="chartSpeed"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
